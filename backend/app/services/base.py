@@ -27,10 +27,25 @@ class BaseModuleService:
         return True, ""
 
     def cross_module_effect(
-        self, entry_id: int, action: str, entry: dict[str, Any]
+        self, entry_id: int, action: str, entry: dict[str, Any], **kwargs: Any
     ) -> list[dict]:
         """动作执行后的跨模块副作用。返回受影响的联动条目列表。"""
         return []
+
+    def handle_custom_action(
+        self,
+        entry_id: int,
+        action: str,
+        entry: dict[str, Any],
+        values: dict[str, Any],
+        remark: str | None = None,
+    ) -> tuple[dict[str, Any] | None, str] | None:
+        """处理不在 ACTION_RULES 里的专属动作（可携带 values）。
+
+        返回 None 表示本服务不认领该动作，继续走通用校验；返回二元组则作为
+        动作结果直接返回。
+        """
+        return None
 
     # ── 基础 CRUD ──
     def list_entries(
@@ -77,8 +92,22 @@ class BaseModuleService:
         rows.append(entry)
         return entry, []
 
-    def run_action(self, entry_id: int, action: str) -> tuple[dict[str, Any] | None, str]:
+    def run_action(
+        self,
+        entry_id: int,
+        action: str,
+        values: dict[str, Any] | None = None,
+        remark: str | None = None,
+    ) -> tuple[dict[str, Any] | None, str]:
         """执行动作：幂等检查 -> 前置校验 -> 状态变更 -> 跨模块联动。"""
+        values = values or {}
+        entry = store.find(self.MODULE, entry_id)
+        # 专属动作（如档案员确认存量来源）不改变通用状态机，先交给服务自行处理。
+        if action not in self.ACTION_RULES and entry is not None:
+            handled = self.handle_custom_action(entry_id, action, entry, values, remark)
+            if handled is not None:
+                return handled
+
         # 幂等检查
         if store.check_idempotent(self.MODULE, entry_id, action):
             entry = store.find(self.MODULE, entry_id)
@@ -110,7 +139,7 @@ class BaseModuleService:
             entry["abnormal"] = action in self.NEGATIVE_ACTIONS
 
             # 执行跨模块副作用
-            self.cross_module_effect(entry_id, action, entry)
+            self.cross_module_effect(entry_id, action, entry, values=values)
 
             # 标记幂等
             store.mark_idempotent(self.MODULE, entry_id, action)

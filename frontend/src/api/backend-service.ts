@@ -82,3 +82,88 @@ export async function fetchDependencyGraph(): Promise<{ nodes: unknown[]; edges:
   if (!response.ok) throw new Error('依赖图加载失败')
   return await response.json()
 }
+
+// ── 档案入库清单（凭据）──────────────────────────────────────────────
+export type IntakeCredential = {
+  id: number
+  '档案编号': number
+  '档案名称': string
+  '档案类别': string
+  '形成日期': string
+  '来源验收记录': number | null
+  '来源验收工序': string
+  '来源验收日期': string
+  '凭据版本': number
+  '关联状态': string
+  '关联方式': string
+  '最近动作号': string
+  '备注说明': string
+  [field: string]: string | number | null
+}
+
+export type IntakeMigrationState = {
+  '状态': string
+  '迁移次数': number
+  '回滚次数': number
+  '更新时间': string
+}
+
+export type IntakeListResult = {
+  items: IntakeCredential[]
+  total: number
+  page: number
+  size: number
+  migration: IntakeMigrationState
+}
+
+export type IntakeEvent = {
+  id: number
+  '动作': string
+  '动作号': string
+  '来源验收记录': number | null
+  '凭据版本': number
+  '时间': string
+  '备注说明': string
+}
+
+export async function listIntake(filters: Record<string, string> = {}): Promise<IntakeListResult> {
+  const query = new URLSearchParams(filters).toString()
+  const response = await request(`/api/archive-intake?${query}`)
+  if (!response.ok) throw new Error('档案入库清单读取失败')
+  return await response.json()
+}
+
+export async function fetchIntakeEvents(credentialId: number): Promise<{ events: IntakeEvent[] }> {
+  const response = await request(`/api/archive-intake/${credentialId}/events`)
+  if (!response.ok) throw new Error('入库凭据动作轨迹读取失败')
+  return await response.json()
+}
+
+export async function migrateIntake(): Promise<{ ok: boolean; message: string }> {
+  const response = await request('/api/archive-intake/migrate', { method: 'POST' })
+  return await response.json()
+}
+
+export async function rollbackIntake(): Promise<{ ok: boolean; message: string }> {
+  const response = await request('/api/archive-intake/rollback', { method: 'POST' })
+  return await response.json()
+}
+
+export async function restoreIntake(): Promise<{ ok: boolean; message: string }> {
+  const response = await request('/api/archive-intake/restore', { method: 'POST' })
+  return await response.json()
+}
+
+export async function confirmIntakeSource(
+  archiveId: number,
+  sourceId: number,
+): Promise<ActionResult> {
+  const response = await request(`/api/archive_mgmt/${archiveId}/actions`, {
+    method: 'POST',
+    body: JSON.stringify({
+      action: '确认入库来源',
+      values: { 来源验收记录: sourceId },
+    }),
+  })
+  return await response.json()
+}

@@ -36,7 +36,7 @@ class AcceptanceRecordService(BaseModuleService):
         return True, ""
 
     def cross_module_effect(
-        self, entry_id: int, action: str, entry: dict[str, Any]
+        self, entry_id: int, action: str, entry: dict[str, Any], **kwargs: Any
     ) -> list[dict]:
         effects = []
         if action == "签署验收":
@@ -61,24 +61,19 @@ class AcceptanceRecordService(BaseModuleService):
                     sched["里程碑节点"] = f"{process}-验收已签署"
                     effects.append(dict(sched))
 
-            # 4. 触发档案归档（自动创建归档条目）
-            arch_rows = store.rows("archive_mgmt")
-            new_arch = {
-                "id": max((int(r.get("id", 0)) for r in arch_rows), default=0) + 1,
-                "档案名称": f"{process}-验收报告",
-                "档案类别": "验收档案",
-                "形成日期": entry.get("验收日期", ""),
-                "保管期限": "永久",
-                "密级等级": "内部",
-                "归档人": entry.get("验收人", ""),
-                "归档状态": "待整理",
-                "备注说明": f"验收签署#{entry_id}自动触发",
-                "status": "待整理",
-                "pending": True,
-                "abnormal": False,
-            }
-            arch_rows.append(new_arch)
-            effects.append(new_arch)
+            # 4. 同步档案入库清单：按「来源验收记录」精确关联，不按档案标题匹配，
+            #    因此同名同日的两份验收报告不会互相串档。
+            from app.services.archive_intake import intake_service
+
+            credential = intake_service.record_sign(
+                entry,
+                actor=entry.get("验收人", ""),
+                remark=f"验收签署#{entry_id}同步档案入库清单",
+            )
+            archive = store.find("archive_mgmt", int(credential.get("档案编号", 0)))
+            if archive is not None:
+                effects.append(dict(archive))
+            effects.append(dict(credential))
 
             # 5. 更新竣工总结质量评定
             for summary in store.rows("completion_summary"):

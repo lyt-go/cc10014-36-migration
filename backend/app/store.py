@@ -10,6 +10,13 @@ from typing import Any
 
 from app.seed import SEED_ROWS
 
+# 内部台账表：随业务模块一起保存在仓库里，但不作为独立业务模块出现在概览/依赖图中。
+INTERNAL_MODULES = {
+    "archive_intake",
+    "archive_link_events",
+    "archive_migration_state",
+}
+
 
 class Store:
     _lock = threading.RLock()
@@ -25,6 +32,9 @@ class Store:
 
     # ── 基础访问 ──
     def module_names(self) -> list[str]:
+        return sorted(name for name in self._tables if name not in INTERNAL_MODULES)
+
+    def all_table_names(self) -> list[str]:
         return sorted(self._tables)
 
     def rows(self, module: str) -> list[dict[str, Any]]:

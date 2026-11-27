@@ -50,7 +50,7 @@ class CompletionSummaryService(BaseModuleService):
         return True, ""
 
     def cross_module_effect(
-        self, entry_id: int, action: str, entry: dict[str, Any]
+        self, entry_id: int, action: str, entry: dict[str, Any], **kwargs: Any
     ) -> list[dict]:
         effects = []
         if action == "执行备案":

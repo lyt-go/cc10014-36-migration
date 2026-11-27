@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from app.schemas import ActionPayload, ActionResult, EntryPayload, PageResult
 from app.services import SERVICE_INSTANCES, service_for
+from app.services.archive_intake import intake_service
 from app.store import store
 
 router = APIRouter(prefix="/api", tags=["业务资源"])
@@ -20,6 +21,93 @@ def require_service(module: str):
     if service is None:
         raise HTTPException(status_code=404, detail=f"未知业务模块：{module}")
     return service
+
+
+# ── 档案入库清单：必须在 /{module} 动态路由之前注册 ──
+# 旧编号仍可查：档案本身照旧走 /api/archive_mgmt/{id}，凭据以档案编号为原编号。
+
+@router.get("/archive-intake")
+def list_intake(
+    keyword: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    source_id: int | None = Query(default=None),
+    archive_id: int | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=200),
+) -> dict[str, Any]:
+    """档案入库清单：一行对应一份档案和它的入库凭据。"""
+    intake_service.ensure_migrated()
+    items, total = intake_service.list_entries(
+        keyword=keyword, status=status, page=page, size=size,
+        source_id=source_id, archive_id=archive_id,
+    )
+    return {
+        "items": [dict(item) for item in items],
+        "total": total,
+        "page": page,
+        "size": size,
+        "migration": intake_service.migration_state(),
+    }
+
+
+@router.get("/archive-intake/migration")
+def intake_migration_state() -> dict[str, Any]:
+    """查看迁移/回滚状态，确认升级是否已经执行。"""
+    return intake_service.migration_state()
+
+
+@router.post("/archive-intake/migrate")
+def intake_migrate() -> dict[str, Any]:
+    """迁移旧式档案关联为入库凭据；可重复执行，不会重复插入同源档案。"""
+    return intake_service.migrate(triggered_by="api")
+
+
+@router.post("/archive-intake/rollback")
+def intake_rollback() -> dict[str, Any]:
+    """回滚迁移：只撤销迁移凭据，不动验收签署和人工确认结果。"""
+    return intake_service.rollback(triggered_by="api")
+
+
+@router.post("/archive-intake/restore")
+def intake_restore() -> dict[str, Any]:
+    """恢复迁移：重新建立迁移凭据，不回退已完成的签署关联。"""
+    return intake_service.restore(triggered_by="api")
+
+
+@router.get("/archive-intake/{credential_id}")
+def get_intake(credential_id: int) -> dict[str, Any]:
+    """按凭据编号查看入库凭据及其全部关联动作轨迹。"""
+    credential = intake_service.get(credential_id)
+    if credential is None:
+        raise HTTPException(status_code=404, detail=f"入库凭据 {credential_id} 不存在")
+    result = dict(credential)
+    result["events"] = intake_service.events_for(credential_id)
+    archive = store.find("archive_mgmt", int(credential.get("档案编号", 0)))
+    result["archive"] = dict(archive) if archive else None
+    return result
+
+
+@router.get("/archive-intake/{credential_id}/events")
+def get_intake_events(credential_id: int) -> dict[str, Any]:
+    """逐条列出该凭据上发生过的关联动作（迁移、确认、签署、入库、回滚）。"""
+    credential = intake_service.get(credential_id)
+    if credential is None:
+        raise HTTPException(status_code=404, detail=f"入库凭据 {credential_id} 不存在")
+    events = intake_service.events_for(credential_id)
+    return {"credential_id": credential_id, "events": events, "total": len(events)}
+
+
+@router.get("/archive-intake/by-archive/{archive_id}")
+def get_intake_by_archive(archive_id: int) -> dict[str, Any]:
+    """按原档案编号查凭据，保证旧编号仍然可查（回滚留档的也返回历史）。"""
+    credential = intake_service.by_archive(archive_id)
+    if credential is None:
+        credential = intake_service.by_archive(archive_id, include_revoked=True)
+    if credential is None:
+        raise HTTPException(status_code=404, detail=f"档案 {archive_id} 暂无入库凭据")
+    result = dict(credential)
+    result["events"] = intake_service.events_for_archive(archive_id)
+    return result
 
 
 @router.get("/{module}", response_model=PageResult[dict])
@@ -95,7 +183,8 @@ def create_entry(module: str, payload: EntryPayload) -> ActionResult:
 @router.post("/{module}/{entry_id}/actions", response_model=ActionResult)
 def run_action(module: str, entry_id: int, payload: ActionPayload) -> ActionResult:
     service = require_service(module)
-    entry, message = service.run_action(entry_id, payload.action.strip())
+    entry, message = service.run_action(
+        entry_id, payload.action.strip(), values=payload.values, remark=payload.remark)
     return ActionResult(ok=entry is not None, message=message, entry=entry)
 
 

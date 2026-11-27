@@ -95,6 +95,8 @@
       <span>共 {{ total }} 条{{ meta.name }}记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
+
+    <ArchiveIntakePanel v-if="meta.key === 'archive_mgmt'" />
   </section>
 </template>
 
@@ -107,6 +109,7 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/backend-service'
+import ArchiveIntakePanel from '@/views/ArchiveIntakePanel.vue'
 import type { EntryRow } from '@/data/types'
 
 const props = defineProps<{ moduleKey: string }>()

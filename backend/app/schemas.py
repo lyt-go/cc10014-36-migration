@@ -29,3 +29,6 @@ class EntryPayload(BaseModel):
 class ActionPayload(BaseModel):
     action: str
     remark: str | None = None
+    # 需要补充业务参数的动作（例如档案员确认存量来源）在这里带值；
+    # 老调用方不传 values 时保持原有行为。
+    values: dict[str, Any] = Field(default_factory=dict)
